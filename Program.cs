@@ -1,64 +1,58 @@
-﻿using System.Text.Json;
+﻿using CountriesAPI;
+using CountriesAPI.Configuration;
+using CountriesAPI.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using System.Net;
+using System.Text.Json;
+
 
 
 var builder = Host.CreateApplicationBuilder(args);
 
-//builder.Services.AddHttpClient("countries", httpClient =>
-//{
-//    httpClient.BaseAddress = new Uri("https://api.restcountries.com/countries/v5");
-//    httpClient.DefaultRequestHeaders.TryAddWithoutValidation("APIKEY", builder.Configuration["HttpClient:APIKey"]);
+Console.WriteLine(
+    $"Environment: {builder.Environment.EnvironmentName}");
 
-//};
+Console.WriteLine(
+    $"Secrets ID: {builder.Environment
+        .ApplicationName}");
 
-builder.Services.AddHttpClient<CountriesAPI.Client>(httpClient =>
+builder.Services.Configure<CountriesOptions>(builder.Configuration.GetSection(CountriesOptions.SectionName));
+
+builder.Services.AddHttpClient<ICountriesService, CountriesService>((sp, client) =>
 {
-    var apiKey = Environment.GetEnvironmentVariable("REST_COUNTRIES_API_KEY");
+    var options = sp.GetRequiredService<IOptions<CountriesOptions>>().Value;
+    client.BaseAddress = new Uri(options.BaseUrl);
+    client.DefaultRequestHeaders.Add(AuthConstants.ApiKeyHeaderName, $"Bearer {options.ApiKey}");
 
-    if (!string.IsNullOrEmpty(apiKey))
-    {
-        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
-    }
 });
-builder.Services.AddLogging(configure => configure.AddFilter("System.Net.Http.HttpClient.Default", LogLevel.Warning));
-builder.Services.AddScoped<ICountriesService, CountriesService>();
 
 IHost host = builder.Build();
 
 await using (var scope = host.Services.CreateAsyncScope())
 {
+    var serviceProvider = scope.ServiceProvider;
+    var countriesService = serviceProvider.GetRequiredService<ICountriesService>();
 
-}
+    var requestBuilder = new RequestBuilder();
+    requestBuilder.AddField("names.common");
+    requestBuilder.AddField("population");
+    requestBuilder.AddField("currencies");
+    requestBuilder.SetLimit(100);
+    string request = requestBuilder.Build();
 
-    var requestBuilder = new CountriesAPI.RequestBuilder();
-requestBuilder.AddField("names.common");
-requestBuilder.AddField("population");
-requestBuilder.AddField("currencies");
-requestBuilder.SetLimit(100);
-string request = requestBuilder.Build();
-
-try
-{
-    var client = host.Services.GetRequiredService<CountriesAPI.Client>();
-    var countries = await client.GetAllData<CountriesAPI.Country>(request);
+    var countries = await countriesService.GetAllData<Country>(request);
 
     Task1(countries, 5, "N0");
     Task2(countries, 5);
 }
-catch (HttpRequestException e)
-{
-    Console.Error.WriteLine(e.Message);
-}
-catch (JsonException e)
-{
-    Console.Error.WriteLine(e.Message);
-}
 
 host.Dispose();
 
-static void Task1(List<CountriesAPI.Country> countries, int count, string format)
+static void Task1(List<Country> countries, int count, string format)
 {
     // NOTE(Sergei): Quick O(n log n) solution. Can be replaced with a more efficient O(5n) solution using an array for top 5.
     var result = countries
@@ -71,7 +65,7 @@ static void Task1(List<CountriesAPI.Country> countries, int count, string format
     }
 }
 
-static void Task2(List<CountriesAPI.Country> countries, int count)
+static void Task2(List<Country> countries, int count)
 {
     var currencies = new Dictionary<string, int>();
 
